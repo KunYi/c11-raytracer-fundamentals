@@ -73,6 +73,24 @@ static inline double rand01(void){
 void render(const Camera *cam, const Scene *scene,
             int width, int height, int samples, double *fb)
 {
+    /* ── 參數防衛性檢查 ──────────────────────────────────────────
+     * width <= 1 或 height <= 1：(width-1) 或 (height-1) 為 0，
+     *   u/v 計算會除以零，產生 NaN/Inf 污染整張圖。
+     * samples <= 0：pixel /= samples 除以零，行為未定義。
+     * fb == NULL：後續寫入會 segfault。
+     * ──────────────────────────────────────────────────────────── */
+    if (!fb || width < 1 || height < 1 || samples < 1) {
+        fprintf(stderr, "render: 無效參數 "
+                "(width=%d, height=%d, samples=%d, fb=%p)\n",
+                width, height, samples, (void*)fb);
+        return;
+    }
+
+    /* width=1 或 height=1 時，除數為 0；改用 max(dim-1, 1) 使單像素
+     * 情況對應 u=v=0.5（螢幕中心），行為合理且無除以零。           */
+    double inv_w = (width  > 1) ? 1.0 / (double)(width  - 1) : 1.0;
+    double inv_h = (height > 1) ? 1.0 / (double)(height - 1) : 1.0;
+
     g_rand=(unsigned long long)time(NULL);
     for(int j=height-1;j>=0;--j){
         for(int i=0;i<width;++i){
@@ -80,8 +98,8 @@ void render(const Camera *cam, const Scene *scene,
             for(int s=0;s<samples;++s){
                 double jx=(samples>1)?rand01():0.5;
                 double jy=(samples>1)?rand01():0.5;
-                double u=((double)i+jx)/(double)(width-1);
-                double v=((double)j+jy)/(double)(height-1);
+                double u=((double)i+jx)*inv_w;
+                double v=((double)j+jy)*inv_h;
                 Ray ray=camera_get_ray(cam,u,v);
                 pixel=vec3_add(pixel,trace(scene,ray));
             }
