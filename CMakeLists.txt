@@ -41,6 +41,16 @@ target_compile_options(raytracer PRIVATE
     >
 )
 
+# ── OpenMP（選用，找不到時仍可正常建置，只是不啟用並行）──
+find_package(OpenMP)
+if(OpenMP_C_FOUND)
+    message(STATUS "OpenMP    : 已啟用（${OpenMP_C_VERSION}）")
+    target_link_libraries(raytracer PRIVATE OpenMP::OpenMP_C)
+    target_compile_definitions(raytracer PRIVATE _OPENMP_ENABLED)
+else()
+    message(STATUS "OpenMP    : 未找到，使用單執行緒模式")
+endif()
+
 # ── 連結：數學庫（僅 GNU/Clang 需要 -lm，MSVC 內建）+ zlib ──
 target_link_libraries(raytracer PRIVATE
     $<$<C_COMPILER_ID:GNU,Clang>:m>

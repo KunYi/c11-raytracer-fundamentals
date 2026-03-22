@@ -6,6 +6,9 @@
 #include <stdint.h>
 #include <time.h>
 #include <zlib.h>
+#ifdef _OPENMP
+#  include <omp.h>
+#endif
 
 /* 場景求最近交點 */
 static int scene_hit(const Scene *scene, Ray ray,
@@ -65,15 +68,23 @@ static Vec3 trace(const Scene *scene, Ray ray){
 }
 
 /* ══════════════════════════════════════════════════
- *  偽隨機數（LCG）
+ *  偽隨機數（LCG，每執行緒獨立狀態）
+ *
+ *  原本使用單一全域 g_rand，多執行緒並行時會產生 race condition：
+ *  多個執行緒同時讀寫同一個變數，導致隨機數序列損壞，
+ *  嚴重時造成未定義行為。
+ *
+ *  修正：改為傳入執行緒局部的 rand_state 指標，
+ *  每個執行緒維護自己的 LCG 狀態，完全無鎖。
+ *  初始種子 = time(NULL) ^ (thread_id * 質數)，
+ *  確保各執行緒的隨機序列不同。
  * ══════════════════════════════════════════════════ */
-static unsigned long long g_rand=0;
-static inline double rand01(void){
-    g_rand=g_rand*6364136223846793005ULL+1442695040888963407ULL;
+static inline double rand01(unsigned long long *state){
+    *state = (*state) * 6364136223846793005ULL + 1442695040888963407ULL;
     /* 取高 31 位，除以 2^31（而非 2^31-1），保證值域嚴格為 [0, 1)。
      * 若分母用 0x7FFFFFFF，最大狀態值會產生恰好 1.0，
      * 使邊緣像素 u/v > 1，破壞 [0,1) 的取樣保證。              */
-    return (double)((g_rand>>33)&0x7FFFFFFF) / 2147483648.0;
+    return (double)((*state >> 33) & 0x7FFFFFFF) / 2147483648.0;
 }
 
 void render(const Camera *cam, const Scene *scene,
@@ -98,13 +109,42 @@ void render(const Camera *cam, const Scene *scene,
     double inv_w = (width  > 1) ? 1.0 / (double)(width  - 1) : 1.0;
     double inv_h = (height > 1) ? 1.0 / (double)(height - 1) : 1.0;
 
-    g_rand=(unsigned long long)time(NULL);
+    unsigned long long base_seed = (unsigned long long)time(NULL);
+
+    /* ── OpenMP 並行化渲染迴圈 ────────────────────────────────────
+     * schedule(dynamic, 4)：動態分配，每次取 4 行。
+     *   比 static 更均衡：不同行的計算量差異大（含物件的行較慢），
+     *   dynamic 讓快執行緒能繼續取新工作，不會空等慢執行緒。
+     *
+     * 執行緒安全設計：
+     *   - rand_state 是每個執行緒的局部變數（在 j 迴圈內宣告）
+     *   - 種子 = base_seed ^ (omp_get_thread_num() * 質數)
+     *     確保各執行緒的隨機序列互不相同
+     *   - framebuffer 寫入：不同執行緒寫入不同的行（row = height-1-j），
+     *     索引不重疊，天然無鎖，不需要 critical section
+     *
+     * 進度顯示：只在 master 執行緒（thread 0）輸出，避免交錯輸出
+     * ──────────────────────────────────────────────────────────── */
+    volatile int rows_done = 0;  /* 原子計數器（OpenMP atomic 保護） */
+
+#ifdef _OPENMP
+    #pragma omp parallel for schedule(dynamic, 4)
+#endif
     for(int j=height-1;j>=0;--j){
+        /* 每個執行緒的獨立 LCG 狀態，避免 race condition */
+#ifdef _OPENMP
+        unsigned long long rand_state = base_seed
+            ^ ((unsigned long long)omp_get_thread_num() * 6364136223846793005ULL)
+            ^ ((unsigned long long)j * 1442695040888963407ULL);
+#else
+        unsigned long long rand_state = base_seed
+            ^ ((unsigned long long)j * 1442695040888963407ULL);
+#endif
         for(int i=0;i<width;++i){
             Vec3 pixel={0,0,0};
             for(int s=0;s<samples;++s){
-                double jx=(samples>1)?rand01():0.5;
-                double jy=(samples>1)?rand01():0.5;
+                double jx=(samples>1)?rand01(&rand_state):0.5;
+                double jy=(samples>1)?rand01(&rand_state):0.5;
                 double u=((double)i+jx)*inv_w;
                 double v=((double)j+jy)*inv_h;
                 Ray ray=camera_get_ray(cam,u,v);
@@ -115,10 +155,22 @@ void render(const Camera *cam, const Scene *scene,
             int idx=(row*width+i)*3;
             fb[idx+0]=pixel.x; fb[idx+1]=pixel.y; fb[idx+2]=pixel.z;
         }
-        if((height-1-j)%(height/10+1)==0){
-            fprintf(stderr,"\r  進度：%3d%%",(int)(100.0*(height-j)/height));
+
+        /* 進度更新（atomic 保護計數器，只在 master 執行緒顯示） */
+#ifdef _OPENMP
+        #pragma omp atomic
+        rows_done++;
+        if(omp_get_thread_num()==0){
+            fprintf(stderr,"\r  進度：%3d%%",(int)(100.0*rows_done/height));
             fflush(stderr);
         }
+#else
+        rows_done++;
+        if(rows_done%(height/10+1)==0){
+            fprintf(stderr,"\r  進度：%3d%%",(int)(100.0*rows_done/height));
+            fflush(stderr);
+        }
+#endif
     }
     fprintf(stderr,"\r  進度：100%%\n");
 }
