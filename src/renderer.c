@@ -64,10 +64,16 @@ static Vec3 trace(const Scene *scene, Ray ray){
     return scene->bg_color;
 }
 
+/* ══════════════════════════════════════════════════
+ *  偽隨機數（LCG）
+ * ══════════════════════════════════════════════════ */
 static unsigned long long g_rand=0;
 static inline double rand01(void){
     g_rand=g_rand*6364136223846793005ULL+1442695040888963407ULL;
-    return(double)((g_rand>>33)&0x7FFFFFFF)/(double)0x7FFFFFFF;
+    /* 取高 31 位，除以 2^31（而非 2^31-1），保證值域嚴格為 [0, 1)。
+     * 若分母用 0x7FFFFFFF，最大狀態值會產生恰好 1.0，
+     * 使邊緣像素 u/v > 1，破壞 [0,1) 的取樣保證。              */
+    return (double)((g_rand>>33)&0x7FFFFFFF) / 2147483648.0;
 }
 
 void render(const Camera *cam, const Scene *scene,
