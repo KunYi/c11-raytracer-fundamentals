@@ -85,9 +85,10 @@ void render(const Camera *cam, const Scene *scene,
      * samples <= 0：pixel /= samples 除以零，行為未定義。
      * fb == NULL：後續寫入會 segfault。
      * ──────────────────────────────────────────────────────────── */
-    if (!fb || width < 1 || height < 1 || samples < 1) {
+    if (!cam || !scene || !fb || width < 1 || height < 1 || samples < 1) {
         fprintf(stderr, "render: 無效參數 "
-                "(width=%d, height=%d, samples=%d, fb=%p)\n",
+                "(cam=%p, scene=%p, width=%d, height=%d, samples=%d, fb=%p)\n",
+                (const void*)cam, (const void*)scene,
                 width, height, samples, (void*)fb);
         return;
     }
@@ -198,6 +199,18 @@ static void png_chunk(FILE *fp, const char *type,
  * ══════════════════════════════════════════════════ */
 int write_png(const char *path, const double *fb, int width, int height)
 {
+    /* ── 參數防衛性檢查 ──────────────────────────────────────────
+     * PNG 規格要求 width 和 height 均為正整數（IHDR 欄位為 uint32）。
+     * width=0 或 height=0 會產生零位元組的 IDAT，寫出畸形 PNG 檔。
+     * path=NULL 或 fb=NULL 會在後續立即 segfault。
+     * ──────────────────────────────────────────────────────────── */
+    if (!path || !fb || width < 1 || height < 1) {
+        fprintf(stderr, "write_png: 無效參數 "
+                "(path=%s, fb=%p, width=%d, height=%d)\n",
+                path ? path : "NULL", (const void*)fb, width, height);
+        return -1;
+    }
+
     FILE *fp = fopen(path, "wb");
     if(!fp){ perror(path); return -1; }
 

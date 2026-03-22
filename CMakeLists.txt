@@ -41,8 +41,11 @@ target_compile_options(raytracer PRIVATE
     >
 )
 
-# ── 連結數學庫（Linux 需要 -lm） ──
-target_link_libraries(raytracer PRIVATE m ZLIB::ZLIB)
+# ── 連結：數學庫（僅 GNU/Clang 需要 -lm，MSVC 內建）+ zlib ──
+target_link_libraries(raytracer PRIVATE
+    $<$<C_COMPILER_ID:GNU,Clang>:m>
+    ZLIB::ZLIB
+)
 
 # ── 安裝（可選） ──
 install(TARGETS raytracer DESTINATION bin)
@@ -68,7 +71,10 @@ function(add_raytracer_test name src)
         $<$<C_COMPILER_ID:GNU,Clang>: -Wall -Wextra -O0 -g >
         $<$<C_COMPILER_ID:MSVC>: /W4 >
     )
-    target_link_libraries(${name} PRIVATE m ZLIB::ZLIB)
+    target_link_libraries(${name} PRIVATE
+        $<$<C_COMPILER_ID:GNU,Clang>:m>
+        ZLIB::ZLIB
+    )
     add_test(NAME ${name} COMMAND ${name})
 endfunction()
 

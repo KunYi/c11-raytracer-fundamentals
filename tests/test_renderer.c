@@ -171,6 +171,92 @@ TEST(renderer_bugs, rand01_never_reaches_1) {
  *  基本正確性
  * ══════════════════════════════════════ */
 
+/* ── 輔助：可寫的暫存路徑 ── */
+static const char *tmp_png(void) {
+#ifdef _WIN32
+    return "test_write_tmp.png";
+#else
+    return "/tmp/test_write_tmp.png";
+#endif
+}
+
+/* ══════════════════════════════════════
+ *  write_png 參數驗證
+ * ══════════════════════════════════════ */
+
+TEST(write_png, null_path_returns_error) {
+    double fb[3] = {0};
+    ASSERT_EQ(write_png(NULL, fb, 1, 1), -1);
+}
+
+TEST(write_png, null_fb_returns_error) {
+    ASSERT_EQ(write_png(tmp_png(), NULL, 1, 1), -1);
+}
+
+TEST(write_png, zero_width_returns_error) {
+    double fb[3] = {0};
+    ASSERT_EQ(write_png(tmp_png(), fb, 0, 1), -1);
+}
+
+TEST(write_png, zero_height_returns_error) {
+    double fb[3] = {0};
+    ASSERT_EQ(write_png(tmp_png(), fb, 1, 0), -1);
+}
+
+TEST(write_png, negative_dim_returns_error) {
+    double fb[3] = {0};
+    ASSERT_EQ(write_png(tmp_png(), fb, -1, 4), -1);
+    ASSERT_EQ(write_png(tmp_png(), fb,  4, -1), -1);
+}
+
+TEST(write_png, valid_1x1_returns_success) {
+    /* 最小合法輸入：1×1 純黑像素 */
+    double fb[3] = {0.0, 0.0, 0.0};
+    ASSERT_EQ(write_png(tmp_png(), fb, 1, 1), 0);
+}
+
+TEST(write_png, valid_output_has_png_signature) {
+    /* 合法輸出的前 8 bytes 必須是 PNG 簽名 */
+    double fb[3] = {1.0, 0.5, 0.0};
+    write_png(tmp_png(), fb, 1, 1);
+
+    FILE *fp = fopen(tmp_png(), "rb");
+    ASSERT_TRUE(fp != NULL);
+
+    unsigned char sig[8];
+    size_t n = fread(sig, 1, 8, fp);
+    fclose(fp);
+
+    ASSERT_EQ((int)n, 8);
+    /* PNG 簽名：\x89 P N G \r \n \x1a \n */
+    ASSERT_EQ(sig[0], 0x89);
+    ASSERT_EQ(sig[1], 'P');
+    ASSERT_EQ(sig[2], 'N');
+    ASSERT_EQ(sig[3], 'G');
+    ASSERT_EQ(sig[4], 0x0D);
+    ASSERT_EQ(sig[5], 0x0A);
+    ASSERT_EQ(sig[6], 0x1A);
+    ASSERT_EQ(sig[7], 0x0A);
+}
+
+/* ══════════════════════════════════════
+ *  render() 剩餘的 NULL 防衛
+ * ══════════════════════════════════════ */
+
+TEST(render_null, null_cam_no_crash) {
+    Scene  scene = make_empty_scene();
+    double fb[4*4*3];
+    render(NULL, &scene, 4, 4, 1, fb);
+    ASSERT_TRUE(1);
+}
+
+TEST(render_null, null_scene_no_crash) {
+    Camera cam = make_default_camera(4, 4);
+    double fb[4*4*3];
+    render(&cam, NULL, 4, 4, 1, fb);
+    ASSERT_TRUE(1);
+}
+
 TEST(renderer_basic, bg_color_for_empty_scene) {
     /* 空場景每個像素應等於 bg_color */
     Scene  scene = make_empty_scene();
@@ -195,6 +281,17 @@ int main(void) {
         height_1_output_is_finite,
         edge_pixels_finite_with_geometry,
         rand01_never_reaches_1);
+    RUN_SUITE(write_png,
+        null_path_returns_error,
+        null_fb_returns_error,
+        zero_width_returns_error,
+        zero_height_returns_error,
+        negative_dim_returns_error,
+        valid_1x1_returns_success,
+        valid_output_has_png_signature);
+    RUN_SUITE(render_null,
+        null_cam_no_crash,
+        null_scene_no_crash);
     RUN_SUITE(renderer_basic,
         bg_color_for_empty_scene);
     return REPORT();
