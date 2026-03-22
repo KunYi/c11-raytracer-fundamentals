@@ -49,3 +49,30 @@ install(TARGETS raytracer DESTINATION bin)
 
 message(STATUS "Build type : ${CMAKE_BUILD_TYPE}")
 message(STATUS "C standard : C${CMAKE_C_STANDARD}")
+message(STATUS "zlib version: ${ZLIB_VERSION_STRING}")
+
+# ══════════════════════════════════════
+#  測試目標（CTest）
+#  建置：cmake .. && make
+#  執行：ctest --output-on-failure
+#      或各執行檔單獨執行
+# ══════════════════════════════════════
+enable_testing()
+
+set(RENDERER_SRC src/renderer.c)
+
+function(add_raytracer_test name src)
+    add_executable(${name} ${src} ${RENDERER_SRC})
+    target_include_directories(${name} PRIVATE include tests)
+    target_compile_options(${name} PRIVATE
+        $<$<C_COMPILER_ID:GNU,Clang>: -Wall -Wextra -O0 -g >
+        $<$<C_COMPILER_ID:MSVC>: /W4 >
+    )
+    target_link_libraries(${name} PRIVATE m ZLIB::ZLIB)
+    add_test(NAME ${name} COMMAND ${name})
+endfunction()
+
+add_raytracer_test(test_vec3         tests/test_vec3.c)
+add_raytracer_test(test_ray          tests/test_ray.c)
+add_raytracer_test(test_intersection tests/test_intersection.c)
+add_raytracer_test(test_renderer     tests/test_renderer.c)
